@@ -60,7 +60,7 @@ class GraphConvolution(Layer):
 
         output = K.dot(self.adj_matrix, output)
 
-        if self.bias:
+        if self.bias is not None:
             output += self.bias
         return self.activation(output)
 

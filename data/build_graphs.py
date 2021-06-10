@@ -19,7 +19,7 @@ def preprocess_adj_matrix(adj_matrix, symmetric=True):
 def build_adj_matrix(node_data_df, num_neighbors):
     adj_matrix = np.zeros(shape=(node_data_df.shape[1], node_data_df.shape[1]), dtype=np.int32)
     #gene_corr = np.absolute(gene_data_df.corr())
-    node_corr = node_data_df.corr().as_matrix()
+    node_corr = node_data_df.corr().values
     np.fill_diagonal(node_corr, 0)
     print (node_corr)
 
@@ -79,6 +79,3 @@ def build_cells_graph_zebrafish(num_neighbors):
     node_features = zebrafish_data_normalized
 
     return adj_matrix, node_features, labels
-
-
-
