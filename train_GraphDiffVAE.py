@@ -6,6 +6,7 @@ import os
 import argparse
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 
 from autoencoder_models.GraphDiffVAE import GraphDiffVAE
 from data.data_processing import get_gene_expression_data
@@ -43,6 +44,8 @@ if __name__ == '__main__':
         os.mkdir('results/Models')
 
     model_timestamp = time.strftime("%Y%m%d_%H%M%S")
+    tf.compat.v1.disable_eager_execution()
+    print(tf.executing_eagerly())
 
     if args.input_adj_matrix is None:
         gene_expression_normalized = get_gene_expression_data(args.gene_expression_filename)

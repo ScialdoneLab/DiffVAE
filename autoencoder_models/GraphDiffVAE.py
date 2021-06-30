@@ -31,7 +31,7 @@ class GraphDiffVAE(BaseVAE):
         elif loss_mode == 'categorical':
             self.recon_loss = self.recon_loss_categorical
         elif loss_mode == 'f1':
-            self.recon_loss = self.f1_loss
+            self.recon_loss = self.f1_loss_smooth
 
         self.build_encoder()
         self.build_decoder()
@@ -110,7 +110,7 @@ class GraphDiffVAE(BaseVAE):
         kl_loss = - 0.5 * K.sum(1 + self.z_log_var - K.square(self.z_mean) - K.exp(self.z_log_var), axis=-1)
         return K.mean(kl_loss)
 
-    def f1_loss(self, y_true, y_pred):
+    def f1_loss_smooth(self, y_true, y_pred):
 
         tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
         tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
@@ -126,7 +126,7 @@ class GraphDiffVAE(BaseVAE):
 
     def kl_warmup(self, epoch):
         def h(x):
-            return K.exp((-1)/x)
+            return np.exp((-1)/x)
         if epoch == 0:
             value = 0
         elif epoch >= self.epochs/2:
@@ -146,7 +146,7 @@ class GraphDiffVAE(BaseVAE):
 
         adam_optimizer = optimizers.Adam(lr=self.learning_rate, clipvalue=0.5)
         metrics = [self.kl_loss, self.recon_loss]
-        self.graph_vae.compile(optimizer=adam_optimizer, loss=self.graph_vae_loss_function, metrics=[tf.keras.metrics.AUC(), self.kl_weight_log, self.f1_loss, self.kl_loss, self.recon_loss])
+        self.graph_vae.compile(optimizer=adam_optimizer, loss=self.graph_vae_loss_function, metrics=[tf.keras.metrics.AUC(), self.kl_weight_log, self.kl_loss, self.recon_loss])
         self.mcp = ModelCheckpoint(filepath=(self.model_fp + 'weights.hdf5'), monitor='auc', verbose=0, save_best_only=True, save_weights_only=True, mode='min')
         print (self.graph_vae.summary())
 
