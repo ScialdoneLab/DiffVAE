@@ -3,6 +3,7 @@ from keras import regularizers
 from keras.layers import Dropout
 from keras.engine import Layer
 import keras.backend as K
+from keras.layers.advanced_activations import LeakyReLU
 
 ####################################################################
 #### Code adapted from: https://github.com/tkipf/keras-gcn #########
@@ -26,7 +27,10 @@ class GraphConvolution(Layer):
         super(GraphConvolution, self).__init__(**kwargs)
         self.output_dim = output_dim
         self.adj_matrix = K.variable(adj_matrix)
-        self.activation = activations.get(activation)
+        if activation == 'LeakyReLU':
+            self.activation = LeakyReLU(alpha=0.1)
+        else:
+            self.activation = activations.get(activation)
         self.dropout_probability = dropout_probability
         self.use_bias = use_bias
         self.activity_regularizer = regularizers.get(activity_regularizer)
