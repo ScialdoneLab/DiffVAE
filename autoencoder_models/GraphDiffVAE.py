@@ -3,10 +3,12 @@ from keras.models import Model, Sequential
 from keras import metrics, optimizers
 from keras import backend as K
 from keras.regularizers import l2
+from keras.metrics import AUC
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from keras.callbacks import LambdaCallback, ModelCheckpoint
+from sklearn.metrics import roc_auc_score
 
 from autoencoder_models.base.base_VAE import BaseVAE
 from autoencoder_models.base.gcn_layers import GraphConvolution, InnerProduct
@@ -15,7 +17,7 @@ import time
 
 
 class GraphDiffVAE(BaseVAE):
-    def __init__(self, num_nodes, num_features, adj_matrix, latent_dim, hidden_layers_dim, epochs, learning_rate, loss_mode, model_select, kl_weight, timestamp):
+    def __init__(self, num_nodes, num_features, adj_matrix, latent_dim, hidden_layers_dim, epochs, learning_rate, loss_mode, model_select, kl_weight, timestamp, adj_val):
         BaseVAE.__init__(self, original_dim=None, latent_dim=latent_dim,
                          batch_size=1, epochs=epochs, learning_rate=learning_rate)
         self.hidden_layers_dim = hidden_layers_dim
@@ -26,6 +28,7 @@ class GraphDiffVAE(BaseVAE):
         self.kl_weight = kl_weight
         self.model_fp = ('results/Models/' + timestamp + '_')
         self.beta = K.variable(value=0.0)
+        self.adj_val = K.variable(adj_val)
         if loss_mode == 'binary':
             self.recon_loss = self.recon_loss_binary
         elif loss_mode == 'categorical':
@@ -140,21 +143,49 @@ class GraphDiffVAE(BaseVAE):
     def kl_weight_log(self, y_true, y_pred):
         return (self.beta * self.kl_weight)
 
+    def val_auc(self, y_true, y_pred):
+        y_true_vec = K.reshape(y_true, shape=(self.num_nodes*self.num_nodes,)) 
+        y_pred_vec = K.reshape(y_pred, shape=(self.num_nodes*self.num_nodes,))
+        y_adj_vec = K.reshape(self.adj_val, shape=(self.num_nodes*self.num_nodes,))
+        mask = ~tf.cast(y_true_vec, tf.bool)
+        y_true_vec_masked = tf.boolean_mask(y_adj_vec, mask)
+        y_pred_vec_masked = tf.boolean_mask(y_pred_vec, mask)
+        
+        def roc_auc(adj_val, y_true, y_pred):
+            try:
+                return roc_auc_score(y_true=y_true, y_score=y_pred)
+            except:
+                return 0
+        
+        return tf.py_function(roc_auc, (self.adj_val, y_true_vec_masked, y_pred_vec_masked), tf.double)
+
+
+    def train_auc(self, y_true, y_pred):
+        y_true_vec = K.reshape(y_true, shape=(self.num_nodes*self.num_nodes,))
+        y_pred_vec = K.reshape(y_pred, shape=(self.num_nodes*self.num_nodes,))
+        
+        def roc_auc(adj_val, y_true, y_pred):
+            try:
+                return roc_auc_score(y_true=y_true, y_score=y_pred)
+            except:
+                return 0
+        
+        return tf.py_function(roc_auc, (self.adj_val, y_true_vec, y_pred_vec), tf.double)
+
+
     def compile_vae(self):
         K.set_learning_phase(1)
         self.graph_vae = Model(self.input_placeholder, self.x_decoded_mean)
 
         adam_optimizer = optimizers.Adam(lr=self.learning_rate, clipvalue=0.5)
         metrics = [self.kl_loss, self.recon_loss]
-        self.graph_vae.compile(optimizer=adam_optimizer, loss=self.graph_vae_loss_function, metrics=[tf.keras.metrics.AUC(), self.kl_weight_log, self.kl_loss, self.recon_loss])
-        self.mcp = ModelCheckpoint(filepath=(self.model_fp + 'weights.hdf5'), monitor='auc', verbose=0, save_best_only=True, save_weights_only=True, mode='min')
+        self.graph_vae.compile(optimizer=adam_optimizer, loss=self.graph_vae_loss_function, metrics=[self.train_auc, self.val_auc, self.kl_weight_log, self.kl_loss, self.recon_loss])
+        self.mcp = ModelCheckpoint(filepath=(self.model_fp + 'weights.hdf5'), monitor='val_auc', verbose=0, save_best_only=True, save_weights_only=True, mode='min')
         print (self.graph_vae.summary())
 
-    def train_vae(self, node_features, adj_mat, adj_train):
-        self.adj_mat = adj_mat
-        self.adj_train = adj_train
+    def train_vae(self, node_features):
         wu_cb = LambdaCallback(on_epoch_end=lambda epoch, log: self.kl_warmup(epoch))
-        hist = self.graph_vae.fit(node_features, adj_mat,
+        hist = self.graph_vae.fit(node_features, self.adj_matrix,
                 epochs=self.epochs,
                 batch_size=self.num_nodes,
                 shuffle=False, verbose=2, callbacks = [wu_cb, self.mcp])
@@ -163,32 +194,29 @@ class GraphDiffVAE(BaseVAE):
 
         # Plot training & validation metrics
         # print(hist.history.keys())
-        figure, axis = plt.subplots(1,5)
+        figure, axis = plt.subplots(2,2)
 
-        axis[0].plot(hist.history['loss'])
-        axis[0].set_title('Total loss')
-        axis[0].set_ylabel('Loss')
-        axis[0].set_xlabel('Epoch')
+        axis[0, 0].plot(hist.history['loss'])
+        axis[0, 0].set_title('Total loss')
+        axis[0, 0].set_xlabel('Epoch')
 
-        axis[1].plot(hist.history['kl_loss'])
-        axis[1].set_title('KL loss')
-        #axis[1].set_ylabel('Loss')
-        axis[1].set_xlabel('Epoch')
+        axis[0, 1].plot(hist.history['kl_loss'])
+        axis[0, 1].set_title('KL loss')
+        axis[0, 1].set_xlabel('Epoch')
+        axis1_1 = axis[0, 1].twinx()
+        axis1_1.set_ylabel = "KL weight"
+        axis1_1.plot(hist.history['kl_weight_log'], color='tab:orange')
 
-        axis[2].plot(hist.history[self.recon_loss.__name__])
-        axis[2].set_title('Recon loss')
-        #axis[2].set_ylabel('Loss')
-        axis[2].set_xlabel('Epoch')
+        axis[1, 0].plot(hist.history[self.recon_loss.__name__])
+        axis[1, 0].set_title('Recon loss')
+        axis[1, 0].set_xlabel('Epoch')
 
-        axis[3].plot(hist.history['kl_weight_log'])
-        axis[3].set_title('KL weight')
-        #axis[3].set_ylabel('Loss')
-        axis[3].set_xlabel('Epoch')
+        axis[1, 1].plot(hist.history['train_auc'])
+        axis[1, 1].plot(hist.history['val_auc'])
+        axis[1, 1].set_title('ROC AUC')
+        axis[1, 1].set_xlabel('Epoch')
 
-        axis[4].plot(hist.history['auc'])
-        axis[4].set_title('AUC (val)')
-        #axis[4].set_ylabel('Loss')
-        axis[4].set_xlabel('Epoch')
+        figure.tight_layout()
 
         plt.savefig(self.model_fp + 'training_history.png', dpi=300)
 
